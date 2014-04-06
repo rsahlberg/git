@@ -308,7 +308,8 @@ int close_lock_file(struct lock_file *lk)
 
 int commit_lock_file(struct lock_file *lk)
 {
-	char result_file[PATH_MAX];
+	static struct strbuf result_file = STRBUF_INIT;
+	int err;
 
 	if (lk->fd >= 0 && close_lock_file(lk))
 		return -1;
@@ -316,11 +317,12 @@ int commit_lock_file(struct lock_file *lk)
 	if (!lk->active)
 		return 0;
 
-	strcpy(result_file, lk->filename);
 	/* remove ".lock": */
-	result_file[strlen(result_file) - LOCK_SUFFIX_LEN] = 0;
-
-	if (rename(lk->filename, result_file))
+	strbuf_add(&result_file, lk->filename,
+		   strlen(lk->filename) - LOCK_SUFFIX_LEN);
+	err = rename(lk->filename, result_file.buf);
+	strbuf_reset(&result_file);
+	if (err)
 		return -1;
 	lk->active = 0;
 	lk->filename[0] = 0;
