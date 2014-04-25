@@ -164,6 +164,7 @@ static int replace_object_sha1(const char *object_ref,
 	    ref_transaction_commit(transaction, NULL, &err))
 		die("%s", err.buf);
 
+	ref_transaction_free(transaction);
 	return 0;
 }
 

@@ -304,6 +304,7 @@ void create_branch(const char *head,
 					   null_sha1, 0, !forcing, &err) ||
 		    ref_transaction_commit(transaction, msg, &err))
 			die("%s", err.buf);
+		ref_transaction_free(transaction);
 	}
 
 	if (real_ref && track)
