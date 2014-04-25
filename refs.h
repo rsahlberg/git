@@ -216,8 +216,7 @@ enum action_on_err {
 
 /*
  * Begin a reference transaction.  The reference transaction must
- * eventually be commited using ref_transaction_commit() or freed by
- * calling ref_transaction_free().
+ * eventually be freed by calling ref_transaction_free().
  * On failure the err buffer will be updated.
  */
 struct ref_transaction *ref_transaction_begin(struct strbuf *err);
@@ -285,9 +284,8 @@ int ref_transaction_delete(struct ref_transaction *transaction,
 /*
  * Commit all of the changes that have been queued in transaction, as
  * atomically as possible.  Return a nonzero value if there is a
- * problem.  The ref_transaction is freed by this function.
- * If err is non-NULL we will add an error string to it to explain why
- * the transaction failed. The string does not end in newline.
+ * problem. If err is non-NULL we will add an error string to it to explain
+ * why the transaction failed. The string does not end in newline.
  * If the transaction is already in faild state this function will return
  * an error.
  */
