@@ -46,6 +46,7 @@ static const char *submodule_prefix = "";
 static const char *recurse_submodules_default;
 static int shown_url = 0;
 static struct strbuf err = STRBUF_INIT;
+static struct ref_transaction *transaction;
 
 static int option_parse_recurse_submodules(const struct option *opt,
 				   const char *arg, int unset)
@@ -376,7 +377,6 @@ static int s_update_ref(const char *action,
 {
 	char msg[1024];
 	char *rla = getenv("GIT_REFLOG_ACTION");
-	struct ref_transaction *transaction;
 
 	if (dry_run)
 		return 0;
@@ -384,19 +384,10 @@ static int s_update_ref(const char *action,
 		rla = default_rla.buf;
 	snprintf(msg, sizeof(msg), "%s: %s", rla, action);
 
-	transaction = ref_transaction_begin();
-	if (!transaction ||
-	    ref_transaction_update(transaction, ref->name, ref->new_sha1,
-				   ref->old_sha1, 0, check_old, msg, &err) ||
-	    ref_transaction_commit(transaction, &err)) {
-		ref_transaction_free(transaction);
-		error("%s", err.buf);
-		strbuf_release(&err);
-		return errno == ENOTDIR ? STORE_REF_ERROR_DF_CONFLICT :
-					  STORE_REF_ERROR_OTHER;
-	}
-	strbuf_release(&err);
-	ref_transaction_free(transaction);
+	if (ref_transaction_update(transaction, ref->name, ref->new_sha1,
+				   ref->old_sha1, 0, check_old, msg, &err))
+		return STORE_REF_ERROR_OTHER;
+
 	return 0;
 }
 
@@ -546,7 +537,7 @@ static int store_updated_refs(const char *raw_url, const char *remote_name,
 {
 	FILE *fp;
 	struct commit *commit;
-	int url_len, i, rc = 0;
+	int url_len, i, ret, rc = 0;
 	struct strbuf note = STRBUF_INIT;
 	const char *what, *kind;
 	struct ref *rm;
@@ -565,6 +556,12 @@ static int store_updated_refs(const char *raw_url, const char *remote_name,
 	rm = ref_map;
 	if (check_everything_connected(iterate_ref_map, 0, &rm)) {
 		rc = error(_("%s did not send all necessary objects\n"), url);
+		goto abort;
+	}
+
+	transaction = ref_transaction_begin();
+	if (!transaction) {
+		rc = error(_("cannot start ref transaction\n"));
 		goto abort;
 	}
 
@@ -679,6 +676,15 @@ static int store_updated_refs(const char *raw_url, const char *remote_name,
 			}
 		}
 	}
+	ret = ref_transaction_commit(transaction, &err);
+	if (ret) {
+		rc |= ret == -2 ? STORE_REF_ERROR_DF_CONFLICT :
+		  STORE_REF_ERROR_OTHER;
+		error("%s", err.buf);
+	}
+	strbuf_release(&err);
+	ref_transaction_free(transaction);
+
 	if (rc & STORE_REF_ERROR_DF_CONFLICT)
 		error(_("some local refs could not be updated; try running\n"
 		      " 'git remote prune %s' to remove any old, conflicting "
