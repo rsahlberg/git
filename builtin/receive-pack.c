@@ -46,6 +46,8 @@ static void *head_name_to_free;
 static int sent_capabilities;
 static int shallow_update;
 static const char *alt_shallow_file;
+static int num_strings;
+static const char **error_strings;
 
 static enum deny_action parse_deny_action(const char *var, const char *value)
 {
@@ -468,6 +470,13 @@ static int update_shallow_ref(struct command *cmd, struct shallow_info *si)
 	return 0;
 }
 
+static const char *add_error_string(const char *str)
+{
+	error_strings = xrealloc(error_strings,
+				 sizeof(*error_strings) * ++num_strings);
+	return error_strings[num_strings - 1] = xstrdup(str);
+}
+
 static const char *update(struct command *cmd, struct shallow_info *si)
 {
 	const char *name = cmd->ref_name;
@@ -475,7 +484,6 @@ static const char *update(struct command *cmd, struct shallow_info *si)
 	const char *namespaced_name;
 	unsigned char *old_sha1 = cmd->old_sha1;
 	unsigned char *new_sha1 = cmd->new_sha1;
-	struct ref_lock *lock;
 
 	/* only refs/... are allowed */
 	if (!starts_with(name, "refs/") || check_refname_format(name + 5, 0)) {
@@ -576,19 +584,27 @@ static const char *update(struct command *cmd, struct shallow_info *si)
 		return NULL; /* good */
 	}
 	else {
+		struct strbuf err = STRBUF_INIT;
+		struct ref_transaction *transaction;
+
 		if (shallow_update && si->shallow_ref[cmd->index] &&
 		    update_shallow_ref(cmd, si))
 			return "shallow error";
 
-		lock = lock_any_ref_for_update(namespaced_name, old_sha1,
-					       0, NULL);
-		if (!lock) {
-			rp_error("failed to lock %s", name);
-			return "failed to lock";
+		transaction = ref_transaction_begin(&err);
+		if (!transaction ||
+		    ref_transaction_update(transaction, namespaced_name,
+					   new_sha1, old_sha1, 0, 1, &err) ||
+		    ref_transaction_commit(transaction, "push", &err)) {
+			const char *str = add_error_string(err.buf);
+			ref_transaction_free(transaction);
+			strbuf_release(&err);
+			rp_error("%s", str);
+			return str;
 		}
-		if (write_ref_sha1(lock, new_sha1, "push")) {
-			return "failed to write"; /* error() already called */
-		}
+
+		ref_transaction_free(transaction);
+		strbuf_release(&err);
 		return NULL; /* good */
 	}
 }
@@ -1120,6 +1136,14 @@ static int delete_only(struct command *commands)
 	return 1;
 }
 
+static void free_all_strings(void)
+{
+	int i;
+	for (i = 0; i < num_strings; i++)
+		free((void *)error_strings[i]);
+	free(error_strings);
+}
+
 int cmd_receive_pack(int argc, const char **argv, const char *prefix)
 {
 	int advertise_refs = 0;
@@ -1166,6 +1190,7 @@ int cmd_receive_pack(int argc, const char **argv, const char *prefix)
 		usage(receive_pack_usage);
 
 	setup_path();
+	atexit(free_all_strings);
 
 	if (!enter_repo(dir, 0))
 		die("'%s' does not appear to be a git repository", dir);
