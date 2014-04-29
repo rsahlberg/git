@@ -239,6 +239,8 @@ struct ref_transaction *ref_transaction_begin(struct strbuf *err);
  * Function returns 0 on success and non-zero on failure. A failure to update
  * means that the transaction as a whole has failed and will need to be
  * rolled back. On failure the err buffer will be updated.
+ * If the transaction is already in faild state this function will return
+ * an error.
  */
 int ref_transaction_update(struct ref_transaction *transaction,
 			   const char *refname,
@@ -255,6 +257,8 @@ int ref_transaction_update(struct ref_transaction *transaction,
  * Function returns 0 on success and non-zero on failure. A failure to create
  * means that the transaction as a whole has failed and will need to be
  * rolled back. On failure the err buffer will be updated.
+ * If the transaction is already in faild state this function will return
+ * an error.
  */
 int ref_transaction_create(struct ref_transaction *transaction,
 			   const char *refname,
@@ -269,6 +273,8 @@ int ref_transaction_create(struct ref_transaction *transaction,
  * Function returns 0 on success and non-zero on failure. A failure to delete
  * means that the transaction as a whole has failed and will need to be
  * rolled back. On failure the err buffer will be updated.
+ * If the transaction is already in faild state this function will return
+ * an error.
  */
 int ref_transaction_delete(struct ref_transaction *transaction,
 			   const char *refname,
@@ -282,6 +288,8 @@ int ref_transaction_delete(struct ref_transaction *transaction,
  * problem.  The ref_transaction is freed by this function.
  * If err is non-NULL we will add an error string to it to explain why
  * the transaction failed. The string does not end in newline.
+ * If the transaction is already in faild state this function will return
+ * an error.
  */
 int ref_transaction_commit(struct ref_transaction *transaction,
 			   const char *msg, struct strbuf *err);
