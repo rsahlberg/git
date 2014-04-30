@@ -227,6 +227,11 @@ struct ref_transaction *ref_transaction_begin(struct strbuf *err);
  */
 
 /*
+ * ref_transaction_update ref_transaction_create and ref_transaction_delete
+ * all take a flag argument. Currently the only public flag is REF_NODEREF.
+ * Flag values >= 0x100 are reserved for internal use.
+ */
+/*
  * Add a reference update to transaction.  new_sha1 is the value that
  * the reference should have after the update, or zeros if it should
  * be deleted.  If have_old is true, then old_sha1 holds the value
