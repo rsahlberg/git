@@ -33,7 +33,11 @@ static inline int bad_ref_char(int ch)
  * Used as a flag to ref_transaction_delete when a loose ref is being
  * pruned.
  */
-#define REF_ISPRUNING	0x0100
+#define REF_ISPRUNING 0x0100
+/*
+ * Deletion of a ref during rename.
+ */
+#define REF_ISRENAME 0x0200
 
 /*
  * Try to read one refname component from the front of refname.  Return
@@ -2628,9 +2632,10 @@ static int rename_tmp_log(const char *newrefname)
 
 int rename_ref(const char *oldrefname, const char *newrefname, const char *logmsg)
 {
-	unsigned char sha1[20], orig_sha1[20];
-	int flag = 0, logmoved = 0;
-	struct ref_lock *lock;
+	unsigned char sha1[20];
+	int flag = 0;
+	struct ref_transaction *transaction;
+	struct strbuf err = STRBUF_INIT;
 	struct stat loginfo;
 	int log = !lstat(git_path("logs/%s", oldrefname), &loginfo);
 	const char *symref = NULL;
@@ -2641,7 +2646,7 @@ int rename_ref(const char *oldrefname, const char *newrefname, const char *logms
 	if (log && S_ISLNK(loginfo.st_mode))
 		return error("reflog for %s is a symlink", oldrefname);
 
-	symref = resolve_ref_unsafe(oldrefname, orig_sha1, 1, &flag);
+	symref = resolve_ref_unsafe(oldrefname, sha1, 1, &flag);
 	if (flag & REF_ISSYMREF)
 		return error("refname %s is a symbolic ref, renaming it is not supported",
 			oldrefname);
@@ -2663,62 +2668,28 @@ int rename_ref(const char *oldrefname, const char *newrefname, const char *logms
 	if (pack_refs(PACK_REFS_ALL | PACK_REFS_PRUNE))
 		return error("unable to pack refs");
 
-	if (delete_ref(oldrefname, orig_sha1, REF_NODEREF)) {
-		error("unable to delete old %s", oldrefname);
-		goto rollback;
+	transaction = ref_transaction_begin(&err);
+	if (!transaction ||
+	    ref_transaction_delete(transaction, oldrefname, sha1,
+				   REF_NODEREF | REF_ISRENAME,
+				   1, NULL, &err) ||
+	    ref_transaction_update(transaction, newrefname, sha1,
+				   NULL, 0, 0, logmsg, &err) ||
+	    ref_transaction_commit(transaction, &err)) {
+		ref_transaction_free(transaction);
+		error("rename_ref failed: %s", err.buf);
+		strbuf_release(&err);
+		goto rollbacklog;
 	}
-
-	if (!read_ref_full(newrefname, sha1, 1, NULL) &&
-	    delete_ref(newrefname, sha1, REF_NODEREF)) {
-		if (errno==EISDIR) {
-			if (remove_empty_directories(git_path("%s", newrefname))) {
-				error("Directory not empty: %s", newrefname);
-				goto rollback;
-			}
-		} else {
-			error("unable to delete existing %s", newrefname);
-			goto rollback;
-		}
-	}
+	ref_transaction_free(transaction);
 
 	if (log && rename_tmp_log(newrefname))
-		goto rollback;
-
-	logmoved = log;
-
-	lock = lock_ref_sha1_basic(newrefname, NULL, 0, NULL, NULL, 0);
-	if (!lock) {
-		error("unable to lock %s for update", newrefname);
-		goto rollback;
-	}
-	lock->force_write = 1;
-	hashcpy(lock->old_sha1, orig_sha1);
-	if (write_ref_sha1(lock, orig_sha1, logmsg)) {
-		error("unable to write current sha1 into %s", newrefname);
-		goto rollback;
-	}
+		goto rollbacklog;
 
 	return 0;
 
- rollback:
-	lock = lock_ref_sha1_basic(oldrefname, NULL, 0, NULL, NULL, 0);
-	if (!lock) {
-		error("unable to lock %s for rollback", oldrefname);
-		goto rollbacklog;
-	}
-
-	lock->force_write = 1;
-	flag = log_all_ref_updates;
-	log_all_ref_updates = 0;
-	if (write_ref_sha1(lock, orig_sha1, NULL))
-		error("unable to write current sha1 into %s", oldrefname);
-	log_all_ref_updates = flag;
-
  rollbacklog:
-	if (logmoved && rename(git_path("logs/%s", newrefname), git_path("logs/%s", oldrefname)))
-		error("unable to restore logfile %s from %s: %s",
-			oldrefname, newrefname, strerror(errno));
-	if (!logmoved && log &&
+	if (log &&
 	    rename(git_path(TMP_RENAMED_LOG), git_path("logs/%s", oldrefname)))
 		error("unable to restore logfile %s from "TMP_RENAMED_LOG": %s",
 			oldrefname, strerror(errno));
@@ -3523,6 +3494,7 @@ int ref_transaction_commit(struct ref_transaction *transaction,
 			   struct strbuf *err)
 {
 	int ret = 0, delnum = 0, i, save_errno = 0;
+	int logs_unlinked = 0;
 	const char **delnames;
 	int n = transaction->nr;
 	struct ref_update **updates = transaction->updates;
@@ -3543,6 +3515,14 @@ int ref_transaction_commit(struct ref_transaction *transaction,
 	if (ref_update_reject_duplicates(updates, n, err)) {
 		ret = -1;
 		goto cleanup;
+	}
+
+	/* Don't match for name collissions against refs we are deleting */
+	for (i = 0; i < n; i++) {
+		struct ref_update *update = updates[i];
+
+		if (update->flags & REF_ISRENAME)
+			delnames[delnum++] = xstrdup(update->refname);
 	}
 
 	/* Acquire all locks while verifying old values */
@@ -3567,10 +3547,29 @@ int ref_transaction_commit(struct ref_transaction *transaction,
 		}
 	}
 
+	/* delete any refs being renamed */
+	for (i = 0; i < n; i++) {
+		struct ref_update *update = updates[i];
+
+		if (!(update->flags & REF_ISRENAME))
+			continue;
+		if (!update->lock)
+			continue;
+
+		unlink_or_warn(git_path("logs/%s", update->refname));
+		logs_unlinked = 1;
+
+		unlock_ref(update->lock);
+		try_remove_empty_parents((char *)update->refname);
+		update->lock = NULL;
+	}
+
 	/* Perform updates first so live commits remain referenced */
 	for (i = 0; i < n; i++) {
 		struct ref_update *update = updates[i];
 
+		if (!update->lock)
+			continue;
 		if (!is_null_sha1(update->new_sha1)) {
 			ret = write_ref_sha1(update->lock, update->new_sha1,
 					     update->msg);
@@ -3593,16 +3592,17 @@ int ref_transaction_commit(struct ref_transaction *transaction,
 		if (update->lock) {
 			if (delete_ref_loose(update->lock, update->type, err))
 				ret = -1;
-
 			if (!(update->flags & REF_ISPRUNING))
-				delnames[delnum++] = update->lock->ref_name;
+				delnames[delnum++] =
+					xstrdup(update->lock->ref_name);
 		}
 	}
 
 	if (repack_without_refs(delnames, delnum, err))
 		ret = -1;
-	for (i = 0; i < delnum; i++)
-		unlink_or_warn(git_path("logs/%s", delnames[i]));
+	if (!logs_unlinked)
+		for (i = 0; i < delnum; i++)
+			unlink_or_warn(git_path("logs/%s", delnames[i]));
 	clear_loose_ref_cache(&ref_cache);
 
 cleanup:
@@ -3612,6 +3612,8 @@ cleanup:
 	for (i = 0; i < n; i++)
 		if (updates[i]->lock)
 			unlock_ref(updates[i]->lock);
+	for (i = 0; i < delnum; i++)
+		free((char *)delnames[i]);
 	free(delnames);
 	errno = save_errno;
 	if (save_errno == ENOTDIR)
