@@ -288,9 +288,9 @@ test_expect_success 'deleting a dangling symref' '
 test_expect_success 'renaming a symref is not allowed' '
 	git symbolic-ref refs/heads/master2 refs/heads/master &&
 	test_must_fail git branch -m master2 master3 &&
-	git symbolic-ref refs/heads/master2 &&
-	test_path_is_file .git/refs/heads/master &&
-	test_path_is_missing .git/refs/heads/master3
+	git rev-parse --verify refs/heads/master &&
+	test_must_fail git symbolic-ref refs/heads/master3 &&
+	test_must_fail git rev-parse refs/heads/master3
 '
 
 test_expect_success SYMLINKS 'git branch -m u v should fail when the reflog for u is a symlink' '
