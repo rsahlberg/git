@@ -285,11 +285,12 @@ int ref_transaction_delete(struct ref_transaction *transaction,
 
 /*
  * Commit all of the changes that have been queued in transaction, as
- * atomically as possible.  Return a nonzero value if there is a
- * problem. If err is non-NULL we will add an error string to it to explain
- * why the transaction failed. The string does not end in newline.
- * If the transaction is already in faild state this function will return
+ * atomically as possible. If err is non-NULL we will add an error string to
+ * it to explain why the transaction failed. The string does not end in newline.
+ * If the transaction is already in failed state this function will return
  * an error.
+ * Function returns 0 on success, -1 for generic failures and -2 if the
+ * failure was due to a name collision (ENOTDIR).
  */
 int ref_transaction_commit(struct ref_transaction *transaction,
 			   struct strbuf *err);
