@@ -3480,7 +3480,7 @@ static int ref_update_reject_duplicates(struct ref_update **updates, int n,
 int ref_transaction_commit(struct ref_transaction *transaction,
 			   struct strbuf *err)
 {
-	int ret = 0, delnum = 0, i;
+	int ret = 0, delnum = 0, i, save_errno = 0;
 	const char **delnames;
 	int n = transaction->nr;
 	struct ref_update **updates = transaction->updates;
@@ -3516,6 +3516,7 @@ int ref_transaction_commit(struct ref_transaction *transaction,
 		if (update->flags & REF_ISPACKONLY)
 			continue;
 
+		errno = 0;
 		update->lock = lock_ref_sha1_basic(update->refname,
 						   (update->have_old ?
 						    update->old_sha1 :
@@ -3524,6 +3525,8 @@ int ref_transaction_commit(struct ref_transaction *transaction,
 						   &update->type,
 						   delnames, delnum);
 		if (!update->lock) {
+			if (errno == ENOTDIR)
+				save_errno = errno;
 			if (err)
 				strbuf_addf(err, "Cannot lock the ref '%s'.",
 					    update->refname);
@@ -3537,12 +3540,15 @@ int ref_transaction_commit(struct ref_transaction *transaction,
 		struct ref_update *update = updates[i];
 
 		if (!is_null_sha1(update->new_sha1)) {
+			errno = 0;
 			ret = write_ref_sha1(update->lock, update->new_sha1,
 					     update->msg);
 			update->lock = NULL; /* freed by write_ref_sha1 */
 			if (ret) {
 				const char *str = "Cannot update the ref '%s'.";
 
+				if (errno == ENOTDIR)
+					save_errno = errno;
 				if (err)
 					strbuf_addf(err, str, update->refname);
 				goto cleanup;
@@ -3578,6 +3584,7 @@ cleanup:
 		if (updates[i]->lock)
 			unlock_ref(updates[i]->lock);
 	free(delnames);
+	errno = save_errno;
 	return ret;
 }
 
