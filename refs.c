@@ -2242,9 +2242,8 @@ static int lock_packed_refs(struct strbuf *err)
 
 	if (hold_lock_file_for_update(&packlock, git_path("packed-refs"),
 				      0) < 0) {
-		if (err)
-			unable_to_lock_message(git_path("packed-refs"),
-					       errno, err);
+		unable_to_lock_message(git_path("packed-refs"),
+				       errno, err);
 		return -1;
 	}
 	/*
@@ -2554,15 +2553,6 @@ static int add_err_if_unremovable(const char *op, const char *file,
 	return 0;
 }
 
-static int unlink_or_err(const char *file, struct strbuf *err)
-{
-	if (err)
-		return add_err_if_unremovable("unlink", file, err,
-					      unlink(file));
-	else
-		return unlink_or_warn(file);
-}
-
 static int delete_ref_loose(struct ref_lock *lock, int flag, struct strbuf *err)
 {
 	if (!(flag & REF_ISPACKED) || flag & REF_ISSYMREF) {
@@ -2570,7 +2560,8 @@ static int delete_ref_loose(struct ref_lock *lock, int flag, struct strbuf *err)
 		int res, i = strlen(lock->lk->filename) - 5; /* .lock */
 
 		lock->lk->filename[i] = 0;
-		res = unlink_or_err(lock->lk->filename, err);
+		res = add_err_if_unremovable("unlink", lock->lk->filename,
+					     err, unlink(lock->lk->filename));
 		lock->lk->filename[i] = '.';
 		if (res)
 			return 1;
@@ -3626,8 +3617,7 @@ static int ref_update_reject_duplicates(struct ref_update **updates, int n,
 		if (!strcmp(updates[i - 1]->refname, updates[i]->refname)) {
 			const char *str =
 				"Multiple updates for ref '%s' not allowed.";
-			if (err)
-				strbuf_addf(err, str, updates[i]->refname);
+			strbuf_addf(err, str, updates[i]->refname);
 
 			return 1;
 		}
@@ -3705,9 +3695,8 @@ int transaction_commit(struct ref_transaction *transaction,
 			continue;
 
 		if (add_packed_ref(update->refname, sha1)) {
-			if (err)
-				strbuf_addf(err, "Failed to add %s to packed "
-					    "refs", update->refname);
+			strbuf_addf(err, "Failed to add %s to packed "
+				    "refs", update->refname);
 			ret = -1;
 			goto cleanup;
 		}
@@ -3754,9 +3743,8 @@ int transaction_commit(struct ref_transaction *transaction,
 		if (!update->lock) {
 			if (errno == ENOTDIR)
 				df_conflict = 1;
-			if (err)
-				strbuf_addf(err, "Cannot lock the ref '%s'.",
-					    update->refname);
+			strbuf_addf(err, "Cannot lock the ref '%s'.",
+				    update->refname);
 			ret = -1;
 			goto cleanup;
 		}
@@ -3792,9 +3780,8 @@ int transaction_commit(struct ref_transaction *transaction,
 		if (!update->lock) {
 			if (errno == ENOTDIR)
 				df_conflict = 1;
-			if (err)
-				strbuf_addf(err, "Cannot lock the ref '%s'.",
-					    update->refname);
+			strbuf_addf(err, "Cannot lock the ref '%s'.",
+				    update->refname);
 			ret = -1;
 			goto cleanup;
 		}
@@ -3807,9 +3794,8 @@ int transaction_commit(struct ref_transaction *transaction,
 		}
 		if (write_sha1_update_reflog(update->lock, update->new_sha1,
 					     update->msg)) {
-			if (err)
-				strbuf_addf(err, "Failed to update log '%s'.",
-					    update->refname);
+			strbuf_addf(err, "Failed to update log '%s'.",
+				    update->refname);
 			ret = -1;
 			goto cleanup;
 		}
@@ -3819,9 +3805,8 @@ int transaction_commit(struct ref_transaction *transaction,
 		packed = get_packed_refs(&ref_cache);;
 		remove_entry(packed, update->refname);
 		if (add_packed_ref(update->refname, update->new_sha1)) {
-			if (err)
-				strbuf_addf(err, "Failed to add %s to packed "
-					    "refs", update->refname);
+			strbuf_addf(err, "Failed to add %s to packed "
+				    "refs", update->refname);
 			ret = -1;
 			goto cleanup;
 		}
@@ -3846,10 +3831,9 @@ int transaction_commit(struct ref_transaction *transaction,
 			continue;
 		}
 		if (create_reflog(update->refname)) {
+			strbuf_addf(err, "Failed to setup reflog for %s",
+				    update->refname);
 			ret = -1;
-			if (err)
-				strbuf_addf(err, "Failed to setup reflog for "
-					    "%s", update->refname);
 			goto cleanup;
 		}
 		if (!reflog_exists(update->refname))
@@ -3861,10 +3845,8 @@ int transaction_commit(struct ref_transaction *transaction,
 		if (update->reflog_fd < 0) {
 			const char *str = "Cannot lock reflog for '%s'. %s";
 
+			strbuf_addf(err, str, update->refname, strerror(errno));
 			ret = -1;
-			if (err)
-				  strbuf_addf(err, str, update->refname,
-					      strerror(errno));
 			goto cleanup;
 		}
 	}
@@ -3882,8 +3864,7 @@ int transaction_commit(struct ref_transaction *transaction,
 			if (ret) {
 				const char *str = "Cannot update the ref '%s'.";
 
-				if (err)
-					strbuf_addf(err, str, update->refname);
+				strbuf_addf(err, str, update->refname);
 				ret = -1;
 				goto cleanup;
 			}
