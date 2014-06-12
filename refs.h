@@ -153,10 +153,16 @@ extern int peel_ref(const char *refname, unsigned char *sha1);
  */
 #define REF_NODEREF	0x01
 
-/** Reads log for the value of ref during at_time. **/
+/*
+ * Reads log for the value of ref during at_time.
+ * Returns 0 if we found a match. 1 if the reflog does not go far enough back
+ * in time, in which case we return the oldest sha1 we found, or -1 on error.
+ * err is filled in on error.
+ */
 extern int read_ref_at(const char *refname, unsigned long at_time, int cnt,
 		       unsigned char *sha1, char **msg,
-		       unsigned long *cutoff_time, int *cutoff_tz, int *cutoff_cnt);
+		       unsigned long *cutoff_time, int *cutoff_tz,
+		       int *cutoff_cnt, struct strbuf *err);
 
 /** Check if a particular reflog exists */
 extern int reflog_exists(const char *refname);

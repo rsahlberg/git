@@ -520,7 +520,8 @@ static int get_sha1_basic(const char *str, int len, unsigned char *sha1)
 		int nth, i;
 		unsigned long at_time;
 		unsigned long co_time;
-		int co_tz, co_cnt;
+		int co_tz, co_cnt, ret;
+		struct strbuf err = STRBUF_INIT;
 
 		/* Is it asking for N-th entry, or approxidate? */
 		for (i = nth = 0; 0 <= nth && i < reflog_len; i++) {
@@ -543,8 +544,11 @@ static int get_sha1_basic(const char *str, int len, unsigned char *sha1)
 			if (errors)
 				return -1;
 		}
-		if (read_ref_at(real_ref, at_time, nth, sha1, NULL,
-				&co_time, &co_tz, &co_cnt)) {
+		ret = read_ref_at(real_ref, at_time, nth, sha1, NULL,
+				  &co_time, &co_tz, &co_cnt, &err);
+		if (ret < 0)
+			die("%s", err.buf);
+		if (ret) {
 			if (!len) {
 				if (starts_with(real_ref, "refs/heads/")) {
 					str = real_ref + 11;

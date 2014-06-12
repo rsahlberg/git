@@ -3055,7 +3055,8 @@ static char *ref_msg(const char *line, const char *endp)
 
 int read_ref_at(const char *refname, unsigned long at_time, int cnt,
 		unsigned char *sha1, char **msg,
-		unsigned long *cutoff_time, int *cutoff_tz, int *cutoff_cnt)
+		unsigned long *cutoff_time, int *cutoff_tz, int *cutoff_cnt,
+		struct strbuf *err)
 {
 	const char *logfile, *logdata, *logend, *rec, *lastgt, *lastrec;
 	char *tz_c;
@@ -3068,11 +3069,16 @@ int read_ref_at(const char *refname, unsigned long at_time, int cnt,
 
 	logfile = git_path("logs/%s", refname);
 	logfd = open(logfile, O_RDONLY, 0);
-	if (logfd < 0)
-		die_errno("Unable to read log '%s'", logfile);
+	if (logfd < 0) {
+		strbuf_addf(err, "Unable to read log '%s'. %s", logfile,
+			    strerror(errno));
+		return -1;
+	}
 	fstat(logfd, &st);
-	if (!st.st_size)
-		die("Log %s is empty.", logfile);
+	if (!st.st_size) {
+		strbuf_addf(err, "Log %s is empty.", logfile);
+		return -1;
+	}
 	mapsz = xsize_t(st.st_size);
 	log_mapped = xmmap(NULL, mapsz, PROT_READ, MAP_PRIVATE, logfd, 0);
 	logdata = log_mapped;
@@ -3091,7 +3097,7 @@ int read_ref_at(const char *refname, unsigned long at_time, int cnt,
 				lastgt = rec;
 		}
 		if (!lastgt)
-			die("Log %s is corrupt.", logfile);
+			goto fail_corrupt;
 		date = strtoul(lastgt + 1, &tz_c, 10);
 		if (date <= at_time || cnt == 0) {
 			tz = strtoul(tz_c, NULL, 10);
@@ -3105,9 +3111,9 @@ int read_ref_at(const char *refname, unsigned long at_time, int cnt,
 				*cutoff_cnt = reccnt - 1;
 			if (lastrec) {
 				if (get_sha1_hex(lastrec, logged_sha1))
-					die("Log %s is corrupt.", logfile);
+					goto fail_corrupt;
 				if (get_sha1_hex(rec + 41, sha1))
-					die("Log %s is corrupt.", logfile);
+					goto fail_corrupt;
 				if (hashcmp(logged_sha1, sha1)) {
 					warning("Log %s has gap after %s.",
 						logfile, show_date(date, tz, DATE_RFC2822));
@@ -3115,11 +3121,11 @@ int read_ref_at(const char *refname, unsigned long at_time, int cnt,
 			}
 			else if (date == at_time) {
 				if (get_sha1_hex(rec + 41, sha1))
-					die("Log %s is corrupt.", logfile);
+					goto fail_corrupt;
 			}
 			else {
 				if (get_sha1_hex(rec + 41, logged_sha1))
-					die("Log %s is corrupt.", logfile);
+					goto fail_corrupt;
 				if (hashcmp(logged_sha1, sha1)) {
 					warning("Log %s unexpectedly ended on %s.",
 						logfile, show_date(date, tz, DATE_RFC2822));
@@ -3137,14 +3143,14 @@ int read_ref_at(const char *refname, unsigned long at_time, int cnt,
 	while (rec < logend && *rec != '>' && *rec != '\n')
 		rec++;
 	if (rec == logend || *rec == '\n')
-		die("Log %s is corrupt.", logfile);
+		goto fail_corrupt;
 	date = strtoul(rec + 1, &tz_c, 10);
 	tz = strtoul(tz_c, NULL, 10);
 	if (get_sha1_hex(logdata, sha1))
-		die("Log %s is corrupt.", logfile);
+		goto fail_corrupt;
 	if (is_null_sha1(sha1)) {
 		if (get_sha1_hex(logdata + 41, sha1))
-			die("Log %s is corrupt.", logfile);
+			goto fail_corrupt;
 	}
 	if (msg)
 		*msg = ref_msg(logdata, logend);
@@ -3157,6 +3163,10 @@ int read_ref_at(const char *refname, unsigned long at_time, int cnt,
 	if (cutoff_cnt)
 		*cutoff_cnt = reccnt;
 	return 1;
+
+ fail_corrupt:
+	strbuf_addf(err, "Log %s is corrupt.", logfile);
+	return -1;
 }
 
 int reflog_exists(const char *refname)

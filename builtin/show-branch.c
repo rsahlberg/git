@@ -723,6 +723,7 @@ int cmd_show_branch(int ac, const char **av, const char *prefix)
 		char nth_desc[256];
 		char *ref;
 		int base = 0;
+		struct strbuf err = STRBUF_INIT;
 
 		if (ac == 0) {
 			static const char *fake_av[2];
@@ -750,18 +751,22 @@ int cmd_show_branch(int ac, const char **av, const char *prefix)
 				unsigned long at;
 				at = approxidate(reflog_base);
 				read_ref_at(ref, at, -1, sha1, NULL,
-					    NULL, NULL, &base);
+					    NULL, NULL, &base, &err);
 			}
+			strbuf_release(&err);
 		}
 
 		for (i = 0; i < reflog; i++) {
 			char *logmsg, *m;
 			const char *msg;
 			unsigned long timestamp;
-			int tz;
+			int tz, ret;
 
-			if (read_ref_at(ref, 0, base+i, sha1, &logmsg,
-					&timestamp, &tz, NULL)) {
+			ret = read_ref_at(ref, 0, base+i, sha1, &logmsg,
+					  &timestamp, &tz, NULL, &err);
+			if (ret < 0)
+				die("%s", err.buf);
+			if (ret) {
 				reflog = i;
 				break;
 			}
