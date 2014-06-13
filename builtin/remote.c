@@ -749,16 +749,31 @@ static int mv(int argc, const char **argv)
 
 static int remove_branches(struct string_list *branches)
 {
-	int i, result = 0;
+	int i;
+	struct ref_transaction *transaction;
+	struct strbuf err = STRBUF_INIT;
+
+	transaction = transaction_begin(&err);
+	if (!transaction)
+		goto failed;
 	for (i = 0; i < branches->nr; i++) {
 		struct string_list_item *item = branches->items + i;
 		const char *refname = item->string;
 		unsigned char *sha1 = item->util;
 
-		if (delete_ref(refname, sha1, 0))
-			result |= error(_("Could not remove branch %s"), refname);
+		if (transaction_delete_sha1(transaction, refname, sha1, 0,
+					    sha1 && !is_null_sha1(sha1),
+					    "remove branches", &err))
+			goto failed;
 	}
-	return result;
+	if (transaction_commit(transaction, &err))
+		goto failed;
+	return 0;
+
+ failed:
+	error("%s", err.buf);
+	strbuf_release(&err);
+	return -1;
 }
 
 static int rm(int argc, const char **argv)
@@ -1301,11 +1316,13 @@ static int set_head(int argc, const char **argv)
 
 static int prune_remote(const char *remote, int dry_run)
 {
-	int result = 0, i;
+	int i;
 	struct ref_states states;
 	const char *dangling_msg = dry_run
 		? _(" %s will become dangling!")
 		: _(" %s has become dangling!");
+	struct ref_transaction *transaction;
+	struct strbuf err = STRBUF_INIT;
 
 	memset(&states, 0, sizeof(states));
 	get_remote_ref_states(remote, &states, GET_REF_STATES);
@@ -1318,11 +1335,19 @@ static int prune_remote(const char *remote, int dry_run)
 		       : _("(no URL)"));
 	}
 
+	if (!dry_run) {
+		transaction = transaction_begin(&err);
+		if (!transaction)
+			goto failed;
+	}
 	for (i = 0; i < states.stale.nr; i++) {
 		const char *refname = states.stale.items[i].util;
 
-		if (!dry_run)
-			result |= delete_ref(refname, NULL, 0);
+		if (!dry_run &&
+		    transaction_delete_sha1(transaction, refname,
+					    NULL, 0, 0,
+					    "prune remote", &err))
+			goto failed;
 
 		if (dry_run)
 			printf_ln(_(" * [would prune] %s"),
@@ -1332,9 +1357,16 @@ static int prune_remote(const char *remote, int dry_run)
 			       abbrev_ref(refname, "refs/remotes/"));
 		warn_dangling_symref(stdout, dangling_msg, refname);
 	}
+	if (!dry_run && transaction_commit(transaction, &err))
+		goto failed;
 
 	free_remote_ref_states(&states);
-	return result;
+	return 0;
+
+ failed:
+	error("%s", err.buf);
+	strbuf_release(&err);
+	return -1;
 }
 
 static int prune(int argc, const char **argv)
