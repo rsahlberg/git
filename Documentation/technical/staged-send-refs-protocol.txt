@@ -1,0 +1,71 @@
+Staged ref update protocol
+==========================
+
+The staged update refs protocol is used for performing ref updates on
+one or more repositories on a server. It is implemented as staged-send-refs
+on the client side and staged-receive-refs on the server side. 
+
+The protocol does not contain a phase to transfer objects, thus meaning that
+any ref updates must only be to sha1 objects that already exist on the server
+or the ref update will fail.
+
+
+Update request
+--------------
+Send from the client to commit ref changes that has been previously staged.
+
+----
+  update-request    =  first-repo
+		       *repo
+		       flush-pkt
+
+  ref               =  old-id SP new-id SP name
+
+  atomicity         =  "atomic-push-all" / "atomic-push-per-repo"
+ 
+  first-repo        =  PKT-LINE("repo" SP url '\0' [ atomicity ] LF)
+                       *PKT-LINE(ref LF)
+
+  repo              =  PKT-LINE("repo" SP url LF)
+                       *PKT-LINE(ref LF)
+----
+
+Example:
+  C: 003Drepo https://somewhere.com/something.git\0atomic-push-all\n
+  C: 00657e47fe2bd8d01d481f44d7af0531bd93d3b21c01 \
+     066b3b16b2cc6ed89b6d53b56088cba88be6c089 refs/heads/tst\n
+  C: 0075066b3b16b2cc6ed89b6d53b56088cba88be6c089 \
+     0000000000000000000000000000000000000000 \
+     refs/hidden/staging/1413304389\n
+  C: 0000
+
+
+Update reply
+------------
+Sent back from server indicating the status for each ref update.
+
+----
+  update-reply      =  *repo
+		       flush-pkt
+
+  error             =  1*(OCTET)
+
+  repo-ok           =  "repo" SP "ok" SP url
+
+  repo-ng           =  "repo" SP "ng" SP url SP error
+
+  ref-ok            =  "name" SP "ok"
+
+  ref-ng            =  "name" SP "ng" SP error
+
+  ref               =  ref-ok / ref-ng
+
+  repo              =  PKT-LINE(repo-ok / repo-ng LF)
+                       *PKT-LINE(ref LF)
+----
+
+Example
+  C: 003Drepo https://somewhere.com/something.git ok\n
+  C: 0016refs/heads/tst ok\n
+  C: 0026refs/hidden/staging/1413304389 ok\n
+  C: 0000
